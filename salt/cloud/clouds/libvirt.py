@@ -274,6 +274,18 @@ def get_domain_ip(domain, idx, ip_source, skip_loopback=True):
 
     return ips[idx]
 
+def xml_from_string(xml_string):
+    '''
+    xml_string may contain UTF-8
+    '''
+    return ElementTree.fromstring(xml_string)
+
+def xml_to_string(xml):
+    '''
+    Convert ElementTree to a string for consumption by libvirt. Do it in a way that works on
+    python2 and python3.
+    '''
+    return ElementTree.tostring(xml, encoding = 'UTF-8').decode('UTF-8')
 
 def create(vm_):
     '''
@@ -360,7 +372,7 @@ def create(vm_):
 
             log.debug("Source machine XML '%s'", xml)
 
-            domain_xml = ElementTree.fromstring(xml)
+            domain_xml = xml_from_string(xml)
             domain_xml.find('./name').text = name
             if domain_xml.find('./description') is None:
                 description_elem = ElementTree.Element('description')
@@ -371,9 +383,10 @@ def create(vm_):
 
             for iface_xml in domain_xml.findall('./devices/interface'):
                 iface_xml.remove(iface_xml.find('./mac'))
-                # enable IP learning, this might be a default behaviour...
-                if iface_xml.find("./filterref/parameter[@name='CTRL_IP_LEARNING']") is None:
-                    iface_xml.append(ElementTree.fromstring(IP_LEARNING_XML))
+                if ip_source == 'ip-learning':
+                    # enable IP learning, this might be a default behaviour...
+                    if iface_xml.find("./filterref/parameter[@name='CTRL_IP_LEARNING']") is None:
+                        iface_xml.append(xml_from_string(IP_LEARNING_XML))
 
             # If a qemu agent is defined we need to fix the path to its socket
             # <channel type='unix'>
@@ -422,7 +435,7 @@ def create(vm_):
                 else:
                     raise SaltCloudExecutionFailure("Disk type '{0}' not supported".format(disk_type))
 
-            clone_xml = ElementTree.tostring(domain_xml)
+            clone_xml = xml_to_string(domain_xml)
             log.debug("Clone XML '%s'", clone_xml)
 
             validate_flags = libvirt.VIR_DOMAIN_DEFINE_VALIDATE if validate_xml else 0
@@ -609,13 +622,13 @@ def create_volume_xml(volume):
                     </target>
                 </volume>
                 """
-    volume_xml = ElementTree.fromstring(template)
+    volume_xml = xml_from_string(template)
     # TODO: generate name
     volume_xml.find('name').text = generate_new_name(volume.name())
     log.debug("Volume: %s", dir(volume))
     volume_xml.find('capacity').text = six.text_type(volume.info()[1])
     volume_xml.find('./target/path').text = volume.path()
-    xml_string = ElementTree.tostring(volume_xml)
+    xml_string = xml_to_string(volume_xml)
     log.debug("Creating %s", xml_string)
     return xml_string
 
@@ -635,13 +648,13 @@ def create_volume_with_backing_store_xml(volume):
                     </backingStore>
                 </volume>
                 """
-    volume_xml = ElementTree.fromstring(template)
+    volume_xml = xml_from_string(template)
     # TODO: generate name
     volume_xml.find('name').text = generate_new_name(volume.name())
     log.debug("volume: %s", dir(volume))
     volume_xml.find('capacity').text = six.text_type(volume.info()[1])
     volume_xml.find('./backingStore/path').text = volume.path()
-    xml_string = ElementTree.tostring(volume_xml)
+    xml_string = xml_to_string(volume_xml)
     log.debug("Creating %s", xml_string)
     return xml_string
 
@@ -666,7 +679,7 @@ def generate_new_name(orig_name):
 
 def get_domain_volumes(conn, domain):
     volumes = []
-    xml = ElementTree.fromstring(domain.XMLDesc(0))
+    xml = xml_from_string(domain.XMLDesc(0))
     for disk in xml.findall("""./devices/disk[@device='disk'][@type='file']"""):
         if disk.find("./driver[@name='qemu'][@type='qcow2']") is not None:
             source = disk.find("./source").attrib['file']
